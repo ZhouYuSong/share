@@ -2,7 +2,7 @@
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>  // thrust::plus
 #include <thrust/reduce.h>
-
+#include <iostream>
 #include <cmath>
 
 #include "caffe/common.hpp"
@@ -52,30 +52,108 @@ void caffe_gpu_gemm<double>(const CBLAS_TRANSPOSE TransA,
 //      A, N, x, 1, &beta, y, 1));
 //}
 template <>
-void caffe_gpu_gemv<float>(const CBLAS_TRANSPOSE TransA, const int M,
-        const int N,const float alpha,const float* A,const float* x,
+void caffe_gpu_gemv<float>(const CBLAS_TRANSPOSE TransA, const int N,
+        const int M,const float alpha,const float* A,const float* x,
         const float beta,float* y){
-    LOG(INFO)<<"cusparse start";
+    //LOG(INFO)<<"cusparse start";
     cusparseOperation_t cuTransA=
         (TransA == CblasNoTrans)?CUSPARSE_OPERATION_TRANSPOSE:CUSPARSE_OPERATION_NON_TRANSPOSE;
      cusparseMatDescr_t descrA;
-     cusparseCreateMatDescr(&descrA);
+     CUSPARSE_CHECK(cusparseCreateMatDescr(&descrA));
      cusparseSetMatType(descrA,CUSPARSE_MATRIX_TYPE_GENERAL);
      cusparseSetMatIndexBase(descrA,CUSPARSE_INDEX_BASE_ZERO);
      cusparseDirection_t dirA=CUSPARSE_DIRECTION_ROW;
+//     int m=6;
+//     int n=10;
+//     float* inputM=(float*)malloc(m*n*sizeof(float));
+//     LOG(INFO)<<"InputM:";
+//     cudaMemcpy(inputM,A,m*n*sizeof(float),cudaMemcpyDeviceToHost);
+//     for(int j=0;j<m;j++){
+//        for(int i=0;i<n;i++){
+//            std::cout<<inputM[i*m+j]<<" ";
+//        }
+//        std::cout<<std::endl;
+//     }
+//     std::cout<<std::endl;
+//     LOG(INFO)<<"inputX:";
+//     float* inputY=(float*)malloc(n*sizeof(float));
+//     cudaMemcpy(inputY,x,n*sizeof(float),cudaMemcpyDeviceToHost);
+//     for(int i=0;i<n;i++)
+//         std::cout<<inputY[i]<<" ";
+//     std::cout<<std::endl;
+//     free(inputM);
+//     free(inputY);
+
      int lda=M;
-     int *nnzPerRowColumn=new int[M],*nnzTotalDevHostPtr=new int();
-     LOG(INFO)<<"just to start nnz"<<M<<N;
+     int *nnzPerRowColumn=0;
+     int *nnzTotalDevHostPtr=0;
+     cudaMalloc((void**)&nnzPerRowColumn,(M)*sizeof(int));
+     cudaMalloc((void**)&nnzTotalDevHostPtr,sizeof(int));
      CUSPARSE_CHECK(cusparseSnnz(Caffe::cusparse_handle(),dirA,M,N,descrA,A,lda,nnzPerRowColumn,nnzTotalDevHostPtr));
-     float* csrValA=new float[*nnzTotalDevHostPtr];
-     LOG(INFO)<<"just finish nnz";
-     int *csrRowPtrA=NULL,*csrColIndA=NULL;
+        
+//     int* nnzPerRowPtr=(int*)malloc(m*sizeof(int));
+//     cudaMemcpy(nnzPerRowPtr,nnzPerRowColumn,m*sizeof(int),cudaMemcpyDeviceToHost);
+//     for(int i=0;i<m;i++)
+//     {
+//       std::cout<<nnzPerRowPtr[i]<<" ";
+//     }
+//     std::cout<<std::endl;
+     int* nnzTotalHostPtr=(int*)malloc(sizeof(int));
+     cudaMemcpy(nnzTotalHostPtr,nnzTotalDevHostPtr,sizeof(int),cudaMemcpyDeviceToHost);
+     float* csrValA=0;
+     cudaMalloc((void**)&csrValA,(*nnzTotalHostPtr)*sizeof(float));
+//     LOG(INFO)<<"just finish nnz"<<(*nnzTotalHostPtr)<<"+"<<M<<N;
+     int *csrRowPtrA=0,*csrColIndA=0;
+     cudaMalloc((void**)&csrRowPtrA,(M+1)*sizeof(int));
+     cudaMalloc((void**)&csrColIndA,(*nnzTotalHostPtr)*sizeof(int));
+//     LOG(INFO)<<"just to start dense2csr";
      CUSPARSE_CHECK(cusparseSdense2csr(Caffe::cusparse_handle(),M,N,descrA,A,lda,nnzPerRowColumn,
                  csrValA,csrRowPtrA,csrColIndA));
-     int nnz=*nnzTotalDevHostPtr;
+//     float* csrValAHost=(float*)malloc(sizeof(float)*(*nnzTotalHostPtr));
+//     cudaMemcpy(csrValAHost,csrValA,(*nnzTotalHostPtr)*sizeof(float),cudaMemcpyDeviceToHost);
+//     LOG(INFO)<<"csrvalA:";
+//     for(int i=0,cnt=0;i<*nnzTotalHostPtr;i++){
+//         std::cout<<csrValAHost[i]<<" ";
+//         cnt++;
+//         if(cnt==10){
+//            cnt=1;
+//            std::cout<<std::endl;
+//         }
+//     }
+//     std::cout<<std::endl;
+//     free(csrValAHost);
+ //    LOG(INFO)<<"csrRowPtrA:";
+//     int* csrRowPtr=(int*)malloc(sizeof(int)*(m+1));
+//     cudaMemcpy(csrRowPtr,csrRowPtrA,sizeof(int)*(m+1),cudaMemcpyDeviceToHost);
+//     for(int i=0;i<=m;i++){
+//        std::cout<<csrRowPtr[i]<<" ";
+//     }
+//     std::cout<<std::endl;
+//     LOG(INFO)<<"csrColInd:";
+//     int* csrColInd=(int*)malloc(sizeof(int)*(*nnzTotalHostPtr));
+//     cudaMemcpy(csrColInd,csrColIndA,sizeof(int)*(*nnzTotalHostPtr),cudaMemcpyDeviceToHost);
+//     for(int i=0;i<*nnzTotalHostPtr;i++)
+//     {  
+//         std::cout<<csrColInd[i]<<" ";
+//     }
+//     std::cout<<std::endl;
+     int nnz=*nnzTotalHostPtr;
      CUSPARSE_CHECK(cusparseScsrmv(Caffe::cusparse_handle(),cuTransA,M,N,nnz,&alpha,descrA,
                  csrValA,csrRowPtrA,csrColIndA,x,&beta,y));
-
+//     float* outputY=(float*)malloc(M*sizeof(float));
+//     cudaMemcpy(outputY,y,m*sizeof(float),cudaMemcpyDeviceToHost);
+//     for(int i=0;i<m;i++){
+//        std::cout<<outputY[i]<<" ";
+//     }
+//     std::cout<<std::endl;
+//     free(outputY);
+     cusparseDestroyMatDescr(descrA);
+     cudaFree(csrRowPtrA);
+     cudaFree(csrColIndA);
+     cudaFree(csrValA);
+     cudaFree(nnzPerRowColumn);
+     cudaFree(nnzTotalDevHostPtr);
+     free(nnzTotalHostPtr);
 
 }
 template <>
